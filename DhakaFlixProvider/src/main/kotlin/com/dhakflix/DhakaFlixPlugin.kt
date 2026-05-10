@@ -2,8 +2,6 @@ package com.dhakflix
 
 import com.lagradost.cloudstream3.*
 import com.lagradost.cloudstream3.utils.*
-import com.lagradost.cloudstream3.utils.AppUtils.parseJson
-import org.jsoup.nodes.Element
 
 class DhakaFlix : MainAPI() {
     override var mainUrl = "http://172.16.50.14"
@@ -13,185 +11,105 @@ class DhakaFlix : MainAPI() {
     override val supportedTypes = setOf(TvType.Movie, TvType.TvSeries)
     override var lang = "en"
 
-    // Video file extensions to look for
-    private val videoExtensions = listOf(".mkv", ".mp4", ".avi", ".mov", ".m4v", ".wmv", ".flv", ".webm")
+    private val videoExtensions = listOf(".mkv", ".mp4", ".avi", ".mov", ".wmv", ".webm")
 
-    private fun isVideoFile(href: String): Boolean {
-        val lower = href.lowercase()
-        return videoExtensions.any { lower.endsWith(it) }
-    }
+    private fun isVideo(href: String) = videoExtensions.any { href.lowercase().endsWith(it) }
 
-    private fun isYearFolder(text: String): Boolean {
-        return text.trim().matches(Regex("\\(\\d{4}.*\\)/?")) || text.trim().matches(Regex("\\d{4}/?"))
-    }
+    private fun cleanTitle(raw: String) = raw
+        .substringBeforeLast(".")
+        .replace(".", " ")
+        .replace("_", " ")
+        .replace("-", " ")
+        .trim()
 
-    // Get all category links from the main page
-    private suspend fun getCategories(): List<Pair<String, String>> {
-        val doc = app.get(mainUrl).document
-        return doc.select("a[href]")
-            .filter { el ->
-                val href = el.attr("href")
-                val text = el.text().trim()
-                href.isNotBlank() &&
-                text.isNotBlank() &&
-                !href.startsWith("http") &&
-                !href.startsWith("?") &&
-                !href.startsWith("#") &&
-                text.length > 3
-            }
-            .map { el ->
-                val href = el.attr("href").let {
-                    if (it.startsWith("/")) "$mainUrl$it" else "$mainUrl/$it"
-                }
-                Pair(el.text().trim(), href)
-            }
-    }
-
-    // Get year subfolders from a category page
-    private suspend fun getYearFolders(catUrl: String): List<Pair<String, String>> {
-        return try {
-            val doc = app.get(catUrl).document
-            doc.select("a[href]")
-                .filter { el ->
-                    val href = el.attr("href")
-                    val text = el.text().trim()
-                    href.endsWith("/") &&
-                    !href.startsWith("?") &&
-                    !href.startsWith("http") &&
-                    text != ".." &&
-                    text.isNotBlank()
-                }
-                .map { el ->
-                    val href = el.attr("href").let {
-                        if (it.startsWith("/")) "$mainUrl$it" else "$catUrl/$it".replace("//", "/").replace("http:/", "http://")
-                    }
-                    Pair(el.text().trim(), href)
-                }
-        } catch (e: Exception) {
-            emptyList()
+    private fun fixUrl(base: String, href: String): String {
+        return when {
+            href.startsWith("http") -> href
+            href.startsWith("/") -> "$mainUrl$href"
+            else -> "$base/$href".replace("///", "/").replace("//", "/").replace("http:/", "http://")
         }
     }
 
-    // Get video files from a folder (year folder or category folder)
-    private suspend fun getMoviesFromFolder(folderUrl: String): List<SearchResponse> {
+    private suspend fun getLinks(url: String): List<Pair<String, String>> {
         return try {
-            val doc = app.get(folderUrl).document
-            doc.select("a[href]")
-                .filter { el -> isVideoFile(el.attr("href")) }
-                .map { el ->
-                    val href = el.attr("href")
-                    val fileUrl = if (href.startsWith("http")) href
-                        else "$folderUrl/${href.trimStart('/')}".replace("///", "/").replace("//", "/").replace("http:/", "http://")
-
-                    val title = el.text().trim()
-                        .substringBeforeLast(".")     // remove extension
-                        .replace(".", " ")
-                        .replace("_", " ")
-                        .trim()
-
-                    MovieSearchResponse(
-                        name = title,
-                        url = fileUrl,
-                        apiName = this.name,
-                        type = TvType.Movie
-                    )
+            app.get(url).document.select("a[href]")
+                .mapNotNull {
+                    val href = it.attr("href")
+                    val text = it.text().trim()
+                    if (href.isBlank() || text == ".." || href.startsWith("?")) null
+                    else Pair(text, fixUrl(url, href))
                 }
-        } catch (e: Exception) {
-            emptyList()
-        }
+        } catch (e: Exception) { emptyList() }
     }
 
-    // ─── MAIN PAGE ─────────────────────────────────────────────────────────────
+    private suspend fun getMovies(folderUrl: String): List<SearchResponse> {
+        return getLinks(folderUrl)
+            .filter { isVideo(it.second) }
+            .map { (name, url) ->
+                val year = Regex("\\((\\d{4})\\)").find(url)?.groupValues?.get(1)?.toIntOrNull()
+                newMovieSearchResponse(cleanTitle(name), url, TvType.Movie) {
+                    this.year = year
+                }
+            }
+    }
 
     override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse {
-        val categories = getCategories()
-        val homePageLists = mutableListOf<HomePageList>()
-
-        for ((catName, catUrl) in categories) {
-            try {
-                val items = mutableListOf<SearchResponse>()
-
-                // Check if the category directly has videos
-                val directMovies = getMoviesFromFolder(catUrl)
-                if (directMovies.isNotEmpty()) {
-                    items.addAll(directMovies.take(20))
-                } else {
-                    // It has subfolders (year folders) — get movies from latest years first
-                    val yearFolders = getYearFolders(catUrl).reversed().take(3) // last 3 years
-                    for ((_, yearUrl) in yearFolders) {
-                        val movies = getMoviesFromFolder(yearUrl)
-                        items.addAll(movies.take(10))
-                        if (items.size >= 20) break
-                    }
-                }
-
-                if (items.isNotEmpty()) {
-                    homePageLists.add(HomePageList(catName, items, isHorizontalImages = false))
-                }
-            } catch (e: Exception) {
-                // Skip this category if it fails
-            }
+        val lists = mutableListOf<HomePageList>()
+        val categories = getLinks(mainUrl).filter {
+            it.second != mainUrl && it.second.startsWith(mainUrl) && !isVideo(it.second)
         }
 
-        return HomePageResponse(homePageLists)
-    }
+        for ((catName, catUrl) in categories) {
+            val items = mutableListOf<SearchResponse>()
+            val subLinks = getLinks(catUrl).filter {
+                it.second != catUrl && !isVideo(it.second) && it.second.startsWith(mainUrl)
+            }
 
-    // ─── SEARCH ────────────────────────────────────────────────────────────────
+            if (subLinks.isEmpty()) {
+                items.addAll(getMovies(catUrl).take(20))
+            } else {
+                for ((_, subUrl) in subLinks.reversed().take(3)) {
+                    items.addAll(getMovies(subUrl).take(10))
+                    if (items.size >= 20) break
+                }
+            }
+
+            if (items.isNotEmpty()) lists.add(HomePageList(catName, items))
+        }
+
+        return newHomePageResponse(lists)
+    }
 
     override suspend fun search(query: String): List<SearchResponse> {
         val results = mutableListOf<SearchResponse>()
-        val queryLower = query.lowercase()
-        val categories = getCategories()
-
-        for ((_, catUrl) in categories) {
-            try {
-                // First check direct videos
-                val directMovies = getMoviesFromFolder(catUrl)
-                results.addAll(directMovies.filter { it.name.lowercase().contains(queryLower) })
-
-                // Then check year subfolders
-                val yearFolders = getYearFolders(catUrl)
-                for ((_, yearUrl) in yearFolders) {
-                    val movies = getMoviesFromFolder(yearUrl)
-                    results.addAll(movies.filter { it.name.lowercase().contains(queryLower) })
-                }
-            } catch (e: Exception) {
-                // Skip failed categories
-            }
-
-            if (results.size >= 100) break // Limit results
+        val q = query.lowercase()
+        val categories = getLinks(mainUrl).filter {
+            it.second != mainUrl && it.second.startsWith(mainUrl) && !isVideo(it.second)
         }
 
+        for ((_, catUrl) in categories) {
+            val subLinks = getLinks(catUrl).filter {
+                it.second != catUrl && !isVideo(it.second) && it.second.startsWith(mainUrl)
+            }
+            val foldersToSearch = if (subLinks.isEmpty()) listOf(catUrl) else subLinks.map { it.second }
+
+            for (folderUrl in foldersToSearch) {
+                getMovies(folderUrl).filter { it.name.lowercase().contains(q) }.forEach {
+                    results.add(it)
+                }
+            }
+            if (results.size >= 100) break
+        }
         return results
     }
 
-    // ─── LOAD ──────────────────────────────────────────────────────────────────
-
     override suspend fun load(url: String): LoadResponse {
-        val fileName = url.substringAfterLast("/")
-        val title = fileName
-            .substringBeforeLast(".")
-            .replace(".", " ")
-            .replace("_", " ")
-            .replace("-", " ")
-            .trim()
-
-        // Try to extract year from URL path
-        val yearMatch = Regex("\\((\\d{4})\\)").find(url)
-        val year = yearMatch?.groupValues?.get(1)?.toIntOrNull()
-
-        return MovieLoadResponse(
-            name = title,
-            url = url,
-            apiName = this.name,
-            type = TvType.Movie,
-            dataUrl = url,
-            year = year,
-            plot = "Direct stream from DhakaFlix local server"
-        )
+        val title = cleanTitle(url.substringAfterLast("/"))
+        val year = Regex("\\((\\d{4})\\)").find(url)?.groupValues?.get(1)?.toIntOrNull()
+        return newMovieLoadResponse(title, url, TvType.Movie, url) {
+            this.year = year
+        }
     }
-
-    // ─── LOAD LINKS ────────────────────────────────────────────────────────────
 
     override suspend fun loadLinks(
         data: String,
@@ -199,29 +117,23 @@ class DhakaFlix : MainAPI() {
         subtitleCallback: (SubtitleFile) -> Unit,
         callback: (ExtractorLink) -> Unit
     ): Boolean {
+        val quality = when {
+            data.contains("1080", true) -> Qualities.P1080.value
+            data.contains("720", true) -> Qualities.P720.value
+            data.contains("480", true) -> Qualities.P480.value
+            data.contains("4k", true) || data.contains("2160", true) -> Qualities.UHD.value
+            else -> Qualities.Unknown.value
+        }
         callback(
             ExtractorLink(
                 source = name,
                 name = name,
                 url = data,
                 referer = mainUrl,
-                quality = getQualityFromName(data),
+                quality = quality,
                 isM3u8 = false
             )
         )
         return true
-    }
-
-    // Detect quality from filename (e.g. 1080p, 720p, 4K)
-    private fun getQualityFromName(url: String): Int {
-        val lower = url.lowercase()
-        return when {
-            lower.contains("4k") || lower.contains("2160p") -> Qualities.UHD.value
-            lower.contains("1080p") || lower.contains("1080") -> Qualities.P1080.value
-            lower.contains("720p") || lower.contains("720") -> Qualities.P720.value
-            lower.contains("480p") || lower.contains("480") -> Qualities.P480.value
-            lower.contains("360p") || lower.contains("360") -> Qualities.P360.value
-            else -> Qualities.Unknown.value
-        }
     }
 }
