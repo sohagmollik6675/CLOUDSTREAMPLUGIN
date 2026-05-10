@@ -1,0 +1,44 @@
+[
+    {
+        "iconUrl": "",
+        "fileHash": "sha256-3164b4d32f645104f1e4868169c20e7c24c8bc2a69b20bf9b3b3a94597dd8bf0",
+        "apiVersion": 1,
+        "repositoryUrl": "https://github.com/sohagmollik6675/CLOUDSTREAMPLUGIN",
+        "fileSize": 14191,
+        "status": 1,
+        "language": "en",
+        "authors": [
+            "local"
+        ],
+        "tvTypes": [
+            "Movie",
+            "TvSeries"
+        ],
+        "version": 1,
+        "internalName": "DhakaFlixProvider",
+        "description": "DhakaFlix \u2013 streams movies from your local server at 172.16.50.14",
+        "url": "https://raw.githubusercontent.com/sohagmollik6675/CLOUDSTREAMPLUGIN/builds/DhakaFlixProvider.cs3",
+        "name": "DhakaFlixProvider"
+    },
+    {
+        "iconUrl": "https://upload.wikimedia.org/wikipedia/commons/2/2f/Korduene_Logo.png",
+        "fileHash": "sha256-bfa4e72b94e66c3e5ae7ae60551cf820b19fffdfb0d0faea6c937fcbe1f8fdc2",
+        "apiVersion": 1,
+        "repositoryUrl": "https://github.com/sohagmollik6675/CLOUDSTREAMPLUGIN",
+        "fileSize": 7296,
+        "status": 1,
+        "language": "en",
+        "authors": [
+            "Cloudburst",
+            "Luna712"
+        ],
+        "tvTypes": [
+            "Movie"
+        ],
+        "version": 1,
+        "internalName": "ExampleProvider",
+        "description": "Lorem ipsum",
+        "url": "https://raw.githubusercontent.com/sohagmollik6675/CLOUDSTREAMPLUGIN/builds/ExampleProvider.cs3",
+        "name": "ExampleProvider"
+    }
+]
