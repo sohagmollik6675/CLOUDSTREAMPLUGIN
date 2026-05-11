@@ -1,0 +1,8 @@
+{
+  "name": "Sohag Repo",
+  "description": "Custom CloudStream Plugins",
+  "manifestVersion": 1,
+  "pluginLists": [
+    "https://raw.githubusercontent.com/sohagmollik6675/CLOUDSTREAMPLUGIN/master/builds/plugins.json"
+  ]
+}
